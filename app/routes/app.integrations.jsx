@@ -3,36 +3,45 @@
 import { useLoaderData } from "react-router"
 import { useState } from "react"
 import { authenticate } from "../shopify.server"
-import { PrismaClient } from "@prisma/client"
-
-const prisma = new PrismaClient()
+import prisma from "../db.server"
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request)
-  const shopId = session?.shop
+  const shopDomain = session?.shop
 
-  if (!shopId) {
+  if (!shopDomain) {
     throw new Response("Unauthorized", { status: 401 })
   }
 
   try {
-    const shop = await prisma.shop.findFirst({
-      where: { shopDomain: shopId },
+    const shop = await prisma.shop.findUnique({
+      where: { shopDomain },
       include: { whatsappCredentials: true },
     })
 
-    return { shop }
+    if (!shop) {
+      throw new Response("Shop not configured", { status: 404 })
+    }
+
+    const webhookUrl = `${process.env.SHOPIFY_APP_URL || "https://your-app.com"}/routes/webhooks/orders`
+
+    return { shop, webhookUrl }
   } catch (error) {
     console.error("Error loading integrations:", error)
-    return { shop: null }
+    return { shop: null, webhookUrl: null }
   }
 }
 
 export default function IntegrationsPage() {
-  const { shop } = useLoaderData()
+  const { shop, webhookUrl } = useLoaderData()
   const [showWebhookGuide, setShowWebhookGuide] = useState(false)
+  const [copied, setCopied] = useState(false)
 
-  const webhookUrl = `${process.env.APP_URL}/routes/api/webhooks/whatsapp`
+  const handleCopyWebhook = () => {
+    navigator.clipboard.writeText(webhookUrl || "")
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   return (
     <s-page heading="Integrations">
@@ -50,7 +59,9 @@ export default function IntegrationsPage() {
                 <strong>Phone Number ID: </strong>
                 {shop.whatsappCredentials[0].phoneNumberId}
               </s-paragraph>
-              <s-button variant="secondary">Reconnect</s-button>
+              <s-button href="/app/settings" variant="secondary">
+                Manage Credentials
+              </s-button>
             </s-stack>
           </s-box>
         ) : (
@@ -66,24 +77,33 @@ export default function IntegrationsPage() {
         {showWebhookGuide && (
           <s-box padding="base" borderRadius="base" background="highlight">
             <s-stack direction="block" gap="base">
-              <s-heading level="3">Set Up WhatsApp Webhooks</s-heading>
+              <s-heading level="3">Shopify Order Webhooks</s-heading>
               <s-paragraph>
-                To receive real-time updates from WhatsApp, configure your webhook URL in your Meta Business Account:
-              </s-paragraph>
-              <s-box padding="base" borderRadius="base" background="subdued" borderWidth="base">
-                <s-code-block>{webhookUrl}</s-code-block>
-              </s-box>
-              <s-paragraph>
-                <strong>Verify Token:</strong> Use <code>verify_token_123</code> (or set WHATSAPP_WEBHOOK_TOKEN env
-                variable)
-              </s-paragraph>
-              <s-paragraph>
-                <strong>Subscribe to these webhook fields:</strong>
+                The app automatically listens for Shopify order events to trigger WhatsApp automations:
               </s-paragraph>
               <s-unordered-list>
-                <s-list-item>messages</s-list-item>
-                <s-list-item>message_template_status_update</s-list-item>
-                <s-list-item>message_status</s-list-item>
+                <s-list-item>Order Created - Sends order confirmation</s-list-item>
+                <s-list-item>Order Updated - Triggers shipping notifications</s-list-item>
+              </s-unordered-list>
+
+              <s-heading level="3">WhatsApp Cloud API Webhooks</s-heading>
+              <s-paragraph>
+                To receive messages from customers, configure this URL in your Meta Business Account:
+              </s-paragraph>
+              <s-box padding="base" borderRadius="base" background="subdued" borderWidth="base">
+                <pre style={{ margin: 0, overflow: "auto", wordBreak: "break-all" }}>
+                  <code>{webhookUrl}</code>
+                </pre>
+              </s-box>
+              <s-button onClick={handleCopyWebhook}>{copied ? "Copied!" : "Copy URL"}</s-button>
+
+              <s-heading level="3">Webhook Setup Steps</s-heading>
+              <s-unordered-list>
+                <s-list-item>Go to your Meta Business Account</s-list-item>
+                <s-list-item>Navigate to App Settings → Webhooks</s-list-item>
+                <s-list-item>Add the webhook URL above</s-list-item>
+                <s-list-item>Subscribe to: messages, message_status, message_template_status_update</s-list-item>
+                <s-list-item>Verify your token (check environment variables)</s-list-item>
               </s-unordered-list>
             </s-stack>
           </s-box>

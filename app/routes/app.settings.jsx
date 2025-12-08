@@ -3,25 +3,34 @@
 import { useLoaderData, useFetcher } from "react-router"
 import { useState } from "react"
 import { authenticate } from "../shopify.server"
-import { PrismaClient } from "@prisma/client"
-
-const prisma = new PrismaClient()
+import prisma from "../db.server"
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request)
-  const shopId = session?.shop
+  const shopDomain = session?.shop
 
-  if (!shopId) {
+  if (!shopDomain) {
     throw new Response("Unauthorized", { status: 401 })
   }
 
   try {
-    const credential = await prisma.whatsAppCredential.findFirst({
-      where: { shop: { shopDomain: shopId } },
+    const shop = await prisma.shop.findUnique({
+      where: { shopDomain },
     })
-    const billing = await prisma.billingUsage.findFirst({
-      where: { shop: { shopDomain: shopId } },
-    })
+
+    if (!shop) {
+      throw new Response("Shop not configured", { status: 404 })
+    }
+
+    const [credential, billing] = await Promise.all([
+      prisma.whatsAppCredential.findFirst({
+        where: { shopId: shop.id },
+      }),
+      prisma.billingUsage.findFirst({
+        where: { shopId: shop.id },
+      }),
+    ])
+
     return { credential, billing }
   } catch (error) {
     console.error("Error loading settings:", error)
@@ -31,21 +40,33 @@ export const loader = async ({ request }) => {
 
 export const action = async ({ request }) => {
   const { session } = await authenticate.admin(request)
-  const shopId = session?.shop
+  const shopDomain = session?.shop
 
-  if (!shopId) {
+  if (!shopDomain) {
     throw new Response("Unauthorized", { status: 401 })
+  }
+
+  const shop = await prisma.shop.findUnique({
+    where: { shopDomain },
+  })
+
+  if (!shop) {
+    return Response.json({ success: false, error: "Shop not found" }, { status: 404 })
   }
 
   if (request.method === "POST") {
     const formData = await request.formData()
-    const phoneNumberId = formData.get("phoneNumberId")
-    const businessAccountId = formData.get("businessAccountId")
-    const accessToken = formData.get("accessToken")
+    const phoneNumberId = formData.get("phoneNumberId")?.trim()
+    const businessAccountId = formData.get("businessAccountId")?.trim()
+    const accessToken = formData.get("accessToken")?.trim()
+
+    if (!phoneNumberId || !businessAccountId || !accessToken) {
+      return Response.json({ success: false, error: "All fields are required" }, { status: 400 })
+    }
 
     try {
       const credential = await prisma.whatsAppCredential.upsert({
-        where: { shopId },
+        where: { shopId: shop.id },
         update: {
           phoneNumberId,
           businessAccountId,
@@ -55,17 +76,17 @@ export const action = async ({ request }) => {
           phoneNumberId,
           businessAccountId,
           accessToken,
-          shop: { connect: { shopDomain: shopId } },
+          shopId: shop.id,
         },
       })
-      return { success: true, credential }
+      return Response.json({ success: true, credential })
     } catch (error) {
       console.error("Error saving credentials:", error)
-      return { success: false, error: "Failed to save credentials" }
+      return Response.json({ success: false, error: "Failed to save credentials" }, { status: 500 })
     }
   }
 
-  return { success: false }
+  return Response.json({ success: false }, { status: 400 })
 }
 
 export default function SettingsPage() {
