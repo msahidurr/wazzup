@@ -1,16 +1,10 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
 
-// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
-// enough when changing adapters.
-// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.sqlite"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Session {
@@ -29,4 +23,142 @@ model Session {
   locale        String?
   collaborator  Boolean?  @default(false)
   emailVerified Boolean?  @default(false)
+}
+
+model Shop {
+  id                    String   @id @default(cuid())
+  shopName              String
+  shopDomain            String   @unique
+  shopifyAccessToken    String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  whatsappCredentials   WhatsAppCredential[]
+  messageTemplates      MessageTemplate[]
+  automationRules       AutomationRule[]
+  messageLogs           MessageLog[]
+  chatSessions          ChatSession[]
+  billingUsage          BillingUsage?
+  templateCategories    TemplateCategory[]
+}
+
+model WhatsAppCredential {
+  id                    String   @id @default(cuid())
+  shopId                String
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  phoneNumberId         String
+  businessAccountId     String
+  accessToken           String
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([shopId])
+}
+
+model MessageTemplate {
+  id                    String   @id @default(cuid())
+  shopId                String
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name                  String
+  category              String   // "order_confirmation", "shipping_update", "delivery_update", "abandoned_cart", "cod_verification", "custom"
+  content               String
+  variables             String[] // ["order_id", "customer_name", "tracking_url"]
+  isPrebuilt            Boolean  @default(false)
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  automationRules       AutomationRule[]
+  messageLogs           MessageLog[]
+}
+
+model AutomationRule {
+  id                    String   @id @default(cuid())
+  shopId                String
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name                  String
+  trigger               String   // "order_created", "order_shipped", "order_delivered", "cart_abandoned", "cod_pending"
+  templateId            String
+  template              MessageTemplate @relation(fields: [templateId], references: [id])
+  isActive              Boolean  @default(true)
+  delayMinutes          Int?     // For delayed messages
+  conditions            String?  // JSON string for complex conditions
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([shopId, trigger])
+}
+
+model MessageLog {
+  id                    String   @id @default(cuid())
+  shopId                String
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  templateId            String
+  template              MessageTemplate @relation(fields: [templateId], references: [id])
+  recipientPhone        String
+  recipientName         String?
+  messageContent        String
+  status                String   // "pending", "sent", "delivered", "failed"
+  externalMessageId     String?
+  errorMessage          String?
+  createdAt             DateTime @default(now())
+  deliveredAt           DateTime?
+
+  @@index([shopId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+model ChatSession {
+  id                    String   @id @default(cuid())
+  shopId                String
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  customerId            String?
+  customerName          String
+  customerPhone         String   @unique
+  status                String   @default("open") // "open", "closed", "waiting"
+  assignedAgent         String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  messages              ChatMessage[]
+
+  @@index([shopId, status])
+  @@index([status, updatedAt])
+}
+
+model ChatMessage {
+  id                    String   @id @default(cuid())
+  chatSessionId         String
+  chatSession           ChatSession @relation(fields: [chatSessionId], references: [id], onDelete: Cascade)
+  sender                String   // "customer", "agent"
+  content               String
+  createdAt             DateTime @default(now())
+}
+
+model BillingUsage {
+  id                    String   @id @default(cuid())
+  shopId                String   @unique
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  tier                  String   @default("free") // "free", "starter", "pro", "enterprise"
+  messagesQuota         Int      @default(1000)
+  messagesSent          Int      @default(0)
+  currentPeriodStart    DateTime @default(now())
+  currentPeriodEnd      DateTime
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model TemplateCategory {
+  id                    String   @id @default(cuid())
+  shopId                String
+  shop                  Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  name                  String
+  description           String?
+  isDefault             Boolean  @default(false)
+  createdAt             DateTime @default(now())
+
+  @@unique([shopId, name])
+  @@index([shopId])
 }
