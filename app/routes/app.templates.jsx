@@ -93,6 +93,7 @@ export const action = async ({ request }) => {
         const content = formData.get("content")?.trim()
 
         if (!name) {
+          
           return Response.json({ success: false, error: "Template name is required" }, { status: 400 })
         }
         if (!category) {
